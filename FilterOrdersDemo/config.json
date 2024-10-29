@@ -1,0 +1,7 @@
+{
+  "DefaultCityDistrict": "District_1",
+  "DefaultFirstDeliveryDateTime": "2024-10-30 09:00:00",
+  "DefaultDeliveryLogPath": "deliveryLog.json",
+  "DefaultDeliveryOrderPath": "filteredOrders.json",
+  "OrdersFilePath": "orders.json"
+}
