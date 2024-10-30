@@ -5,7 +5,7 @@ using NLog.Targets;
 
 namespace FilterOrdersDemo
 {
-    class Program
+    public class Program
     {
         private static readonly Logger logger = LogManager.GetCurrentClassLogger();
         private static readonly string configPath = "config.json";
@@ -14,46 +14,7 @@ namespace FilterOrdersDemo
         {
             try
             {
-                Config config = Config.Load(configPath);
-
-                string deliveryLogPath = GetArgumentValue(args, "_deliveryLog", config.DefaultDeliveryLogPath);
-
-                ConfigureLogging(deliveryLogPath);
-
-                logger.Info($"Запуск {DateTime.Now}, " + (args.Any() ? $"аргументы: {string.Join(",\n", args)}" : "аргументов не передано"));
-
-                string cityDistrict = GetArgumentValue(args, "_cityDistrict", config.DefaultCityDistrict);
-                string firstDeliveryDateTimeStr = GetArgumentValue(args, "_firstDeliveryDateTime", config.DefaultFirstDeliveryDateTime);
-                string deliveryOrderPath = GetArgumentValue(args, "_deliveryOrder", config.DefaultDeliveryOrderPath);
-
-                DateTime firstDeliveryDateTime;
-                if (!DateTime.TryParse(firstDeliveryDateTimeStr, out firstDeliveryDateTime))
-                {
-                    logger.Warn("Некорректный формат времени первой доставки.");
-                    return;
-                }
-
-                // Чтение данных из файла с заказами с валидацией
-                List<Order> orders = Order.LoadOrders(config.OrdersFilePath);
-                orders = Order.ValidateOrders(orders);
-                if (orders.Count == 0)
-                {
-                    logger.Warn($"Не найдены валидные заказы в файле: {config.OrdersFilePath}");
-                    return;
-                }
-
-                // Фильтрация заказов по указанным параметрам
-                var filteredOrders = orders.Where(order => order.District == cityDistrict &&
-                                                           order.DeliveryTime >= firstDeliveryDateTime &&
-                                                           order.DeliveryTime <= firstDeliveryDateTime.AddMinutes(30))
-                                                           .OrderBy(ord => ord.DeliveryTime)
-                                                           .ToList();
-
-                // Запись результата в файл
-                Order.SaveOrders(filteredOrders, deliveryOrderPath);
-
-                // Логирование операций
-                logger.Info($"Найдено {filteredOrders.Count} валидных заказов для района {cityDistrict} из файла: {config.OrdersFilePath}.");
+                RunApplication(args);
             }
             catch (ArgumentException ex)
             {
@@ -69,6 +30,59 @@ namespace FilterOrdersDemo
             }
         }
 
+        public static void RunApplication(string[] args)
+        {
+            Config config = Config.Load(configPath);
+
+            string deliveryLogPath = GetArgumentValue(args, "_deliveryLog", config.DefaultDeliveryLogPath);
+            ConfigureLogging(deliveryLogPath);
+
+            logger.Info($"Запуск {DateTime.Now}, " + (args.Any() ? $"аргументы: {string.Join(",\n", args)}" : "аргументов не передано"));
+
+            string cityDistrict = GetArgumentValue(args, "_cityDistrict", config.DefaultCityDistrict);
+            DateTime firstDeliveryDateTime = ParseFirstDeliveryDateTime(args, config);
+            if (firstDeliveryDateTime == default)
+            {
+                logger.Warn("Некорректный формат времени первой доставки.");
+                return;
+            }
+
+            IEnumerable<Order> orders = LoadAndValidateOrders(config);
+            if (!orders.Any())
+            {
+                logger.Warn($"Не найдены валидные заказы в файле: {config.OrdersFilePath}");
+                return;
+            }
+
+            IEnumerable<Order> filteredOrders = FilterOrders(orders, cityDistrict, firstDeliveryDateTime);
+            string deliveryOrderPath = GetArgumentValue(args, "_deliveryOrder", config.DefaultDeliveryOrderPath);
+            Order.SaveOrders(filteredOrders, deliveryOrderPath);
+
+            logger.Info($"Найдено {filteredOrders.Count()} валидных заказов для района {cityDistrict} из файла: {config.OrdersFilePath}.");
+        }
+
+        static DateTime ParseFirstDeliveryDateTime(string[] args, Config config)
+        {
+            string firstDeliveryDateTimeStr = GetArgumentValue(args, "_firstDeliveryDateTime", config.DefaultFirstDeliveryDateTime);
+            DateTime.TryParse(firstDeliveryDateTimeStr, out DateTime firstDeliveryDateTime);
+            return firstDeliveryDateTime;
+        }
+
+        static IEnumerable<Order> LoadAndValidateOrders(Config config)
+        {
+            IEnumerable<Order> orders = Order.LoadOrders(config.OrdersFilePath);
+            return Order.GetValidOrders(orders);
+        }
+
+        // Можно использовать Strategy для фильтрации если бы менялась логика фильтрации
+        public static IEnumerable<Order> FilterOrders(IEnumerable<Order> orders, string cityDistrict, DateTime firstDeliveryDateTime)
+        {
+            return orders.Where(order => order.District == cityDistrict &&
+                                         order.DeliveryTime >= firstDeliveryDateTime &&
+                                         order.DeliveryTime <= firstDeliveryDateTime.AddMinutes(30))
+                          .OrderBy(ord => ord.DeliveryTime);
+        }
+
         static void ConfigureLogging(string logPath)
         {
             var config = new LoggingConfiguration();
@@ -76,7 +90,8 @@ namespace FilterOrdersDemo
             var logfile = new FileTarget("logfile")
             {
                 FileName = logPath,
-                Layout = "${longdate} ${uppercase:${level}} ${message} ${onexception:inner=${newline}${exception:format=Data,tostring:innerExceptionSeparator=\n:separator=\n:exceptionDataSeparator=\n}}",
+                Layout = "${longdate} ${uppercase:${level}} ${message} ${onexception:inner=${newline}" +
+                "${exception:format=Data,tostring:innerExceptionSeparator=\n:separator=\n:exceptionDataSeparator=\n}}",
             };
 
             config.AddRule(LogLevel.Info, LogLevel.Fatal, logfile);
@@ -84,8 +99,7 @@ namespace FilterOrdersDemo
             LogManager.Configuration = config;
         }
 
-
-        static string GetArgumentValue(string[] args, string argumentName, string defaultValue)
+        public static string GetArgumentValue(string[] args, string argumentName, string defaultValue)
         {
             try
             {
@@ -110,9 +124,10 @@ namespace FilterOrdersDemo
         public string DefaultDeliveryOrderPath { get; set; }
         public string OrdersFilePath { get; set; }
 
+        // Можно использовать Factory для содзания и загрузки конфига, но не стал реализовывать передачу параметров через переменные среды, так что не вижу смысла городить абстракцию
         public static Config Load(string path)
         {
-            if (!File.Exists(path)) return CreateNewConfig(path);
+            if (!File.Exists(path)) return SaveNewConfig(path);
 
             try
             {
@@ -120,7 +135,7 @@ namespace FilterOrdersDemo
                 if (config == null)
                 {
                     logger.Warn("Загруженный конфиг пуст, создан новый");
-                    return CreateNewConfig(path);
+                    return SaveNewConfig(path);
                 }
                 return config;
             }
@@ -131,18 +146,21 @@ namespace FilterOrdersDemo
             }
         }
 
-        public static Config CreateNewConfig(string path)
+        public static Config SaveNewConfig(string path, Config? config = null)
         {
-            Config defaultConfig = new Config
+            if (config == null)
             {
-                DefaultCityDistrict = "DefaultDistrict",
-                DefaultFirstDeliveryDateTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                DefaultDeliveryLogPath = "deliveryLog.json",
-                DefaultDeliveryOrderPath = "filteredOrders.json",
-                OrdersFilePath = "orders.json"
-            };
-            File.WriteAllText(path, JsonSerializer.Serialize(defaultConfig, new JsonSerializerOptions { WriteIndented = true }));
-            return defaultConfig;
+                config = new Config
+                {
+                    DefaultCityDistrict = "DefaultDistrict",
+                    DefaultFirstDeliveryDateTime = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    DefaultDeliveryLogPath = "deliveryLog.json",
+                    DefaultDeliveryOrderPath = "filteredOrders.json",
+                    OrdersFilePath = "orders.json"
+                };
+            }
+            File.WriteAllText(path, JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true }));
+            return config;
         }
     }
 
@@ -155,7 +173,7 @@ namespace FilterOrdersDemo
         public string District { get; set; }
         public DateTime DeliveryTime { get; set; }
 
-        public static List<Order> LoadOrders(string path)
+        public static IEnumerable<Order> LoadOrders(string path)
         {
             if (!File.Exists(path))
             {
@@ -166,7 +184,7 @@ namespace FilterOrdersDemo
 
             try
             {
-                var orders = JsonSerializer.Deserialize<List<Order>>(File.ReadAllText(path));
+                var orders = JsonSerializer.Deserialize<IEnumerable<Order>>(File.ReadAllText(path));
                 return orders;
             }
             catch (JsonException ex)
@@ -176,7 +194,8 @@ namespace FilterOrdersDemo
             }
         }
 
-        public static List<Order> ValidateOrders(List<Order> orders)
+        // Можно использовать Chain of Responsibility для валидации, но опять же не вижу смысла, т.к. в такой реализации удобнее собирать ошибки
+        public static IEnumerable<Order> GetValidOrders(IEnumerable<Order> orders)
         {
             var validOrders = new List<Order>();
             var errors = new List<string>();
@@ -236,7 +255,7 @@ namespace FilterOrdersDemo
             return validOrders;
         }
 
-        public static void SaveOrders(List<Order> orders, string path)
+        public static void SaveOrders(IEnumerable<Order> orders, string path)
         {
             try
             {

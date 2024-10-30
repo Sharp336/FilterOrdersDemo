@@ -1,7 +1,9 @@
 {
-  "DefaultCityDistrict": "District_1",
-  "DefaultFirstDeliveryDateTime": "2024-10-30 09:00:00",
-  "DefaultDeliveryLogPath": "deliveryLog.json",
-  "DefaultDeliveryOrderPath": "filteredOrders.json",
-  "OrdersFilePath": "orders.json"
+  "DefaultCityDistrict": "District_2",
+  "DefaultFirstDeliveryDateTime": "2024-90-30 09:00:00",
+  "DefaultDeliveryLogPath": "deliveryLogg.json",
+  "DefaultDeliveryOrderPath": "filteredOrderss.json",
+  "OrdersFilePath": "orders.json",
+  "argsForTest" : "_cityDistrict=District_1 _firstDeliveryDateTime="2024-10-30 09:00:00" _deliveryLog=deliveryLog.json _deliveryOrder=filteredOrders.json
+"
 }
